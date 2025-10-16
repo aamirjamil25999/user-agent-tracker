@@ -26,34 +26,35 @@ export async function GET(req) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
-  // ✅ Fetch all registered users
+  // ✅ Fetch all real users
   const users = await User.find().lean();
+  const allAgents = [];
 
   const clamp = (t) => {
     if (!(t instanceof Date)) t = new Date(t);
     return Math.min(Math.max(t.getTime(), dayStart.getTime()), dayEnd.getTime());
   };
 
-  const allAgents = [];
-
-  // ✅ Loop through all users to compute stats
   for (const user of users) {
-    const sessions = await Session.find({
-      userId: user._id,
-      $or: [
-        { loginTime: { $gte: dayStart, $lt: dayEnd } },
-        { logoutTime: { $gte: dayStart, $lt: dayEnd } },
-      ],
-    }).lean();
-
-    const visits = await Visit.find({
-      agentId: user._id,
-      startTime: { $gte: dayStart, $lt: dayEnd },
-    }).lean();
+    const [sessions, visits] = await Promise.all([
+      Session.find({
+        userId: user._id,
+        $or: [
+          { loginTime: { $gte: dayStart, $lt: dayEnd } },
+          { logoutTime: { $gte: dayStart, $lt: dayEnd } },
+        ],
+      }).lean(),
+      Visit.find({
+        agentId: user._id,
+        startTime: { $gte: dayStart, $lt: dayEnd },
+      }).lean(),
+    ]);
 
     let workingMs = 0;
     let inactivityMs = 0;
+    let visitMs = 0;
 
+    // ✅ Calculate working + inactivity
     for (const s of sessions) {
       const login = new Date(s.loginTime);
       const logout = s.logoutTime ? new Date(s.logoutTime) : new Date();
@@ -67,16 +68,25 @@ export async function GET(req) {
       }
     }
 
-    // ✅ Status Logic
+    // ✅ Calculate visit duration
+    for (const v of visits) {
+      const start = new Date(v.startTime);
+      const end = new Date(v.endTime || v.startTime);
+      visitMs += Math.max(0, clamp(end) - clamp(start));
+    }
+
+    // ✅ Determine status
     const isCurrentUser = user.email === userData.email;
     const status = isCurrentUser ? "Active" : "Offline";
 
+    // ✅ Push each agent
     allAgents.push({
       agentId: String(user._id),
       name: user.name,
       email: user.email,
       sessions: sessions.length || 0,
       visits: visits.length || 0,
+      visitDuration: +(visitMs / 3600000).toFixed(2), // 🕒 in hours
       workingHours: +(workingMs / 3600000).toFixed(2),
       inactiveHours: +(inactivityMs / 3600000).toFixed(2),
       activeHours: +((workingMs - inactivityMs) / 3600000).toFixed(2),
@@ -84,7 +94,7 @@ export async function GET(req) {
     });
   }
 
-  // ✅ Return only real users (no dummy data)
+  // ✅ Return final real agents only (no dummy)
   return NextResponse.json({
     ok: true,
     date: dateStr,
