@@ -1,4 +1,4 @@
-// app/api/reports/route.js
+
 import { NextResponse } from "next/server";
 import { connect } from "../_utils/db";
 import Session from "../../../models/Session";

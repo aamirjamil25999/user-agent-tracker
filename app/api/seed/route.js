@@ -1,4 +1,4 @@
-// app/api/seed/route.js
+
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcrypt';
 import { connect } from '../_utils/db';
